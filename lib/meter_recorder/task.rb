@@ -8,7 +8,7 @@
 
 require 'ygg/agent/task'
 
-module MeteoRecorder
+module MeterRecorder
 
 class Task < Ygg::Agent::Task
 end

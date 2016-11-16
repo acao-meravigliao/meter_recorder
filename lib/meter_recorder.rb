@@ -31,9 +31,12 @@ class App < Ygg::Agent::Base
   def agent_boot
     @pg = PG::Connection.open(mycfg.db.to_h)
 
-    @ins_statement = @pg.prepare('insert_meter',
-      'INSERT INTO acao_meter_measures (meter_id, at, voltage, current, power, frequency, power_factor, exported_energy, imported_energy, total_energy) ' +
-      'VALUES ($1,now(),$2,$3,$4,$5,$6,$7,$8,$9)')
+    @ins_statement = @pg.prepare('insert_measure',
+      'INSERT INTO acao_meter_measures (meter_id, at, voltage, current, power, app_power, rea_power, ' +
+                                       'frequency, power_factor, exported_energy, imported_energy, total_energy) ' +
+      'VALUES ($1,now(),$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)')
+
+    @lookup_statement = @pg.prepare('select_meter', 'SELECT * FROM acao_meters WHERE uuid=$1')
 
     @amqp.ask(AM::AMQP::MsgExchangeDeclare.new(
       channel_id: @amqp_chan,
@@ -65,34 +68,37 @@ class App < Ygg::Agent::Base
       queue_name: mycfg.queue,
       send_to: self.actor_ref,
     )).value.consumer_tag
+
+    @meters = {}
   end
 
   def meter_update(message)
     payload = JSON.parse(message.payload).deep_symbolize_keys!
 
-log.warn(message)
+    meter = @meters[message.routing_key]
+    if !meter
+      res = @pg.exec_prepared('select_meter', [ message.routing_key ])
+      if res.ntuples == 0
+        log.warn "Meter #{message.routing_key} not found, ignoring message"
+        return
+      end
 
-    @pg.transaction do
-#      if payload[:data][:wind_dir]
-#        @pg.exec_prepared('insert_meter', [ payload[:sample_ts], payload[:station_id], 'WIND_DIR', payload[:data][:wind_dir] ])
-#      end
-#
-#      if payload[:data][:wind_speed]
-#        @pg.exec_prepared('insert_meter', [ payload[:sample_ts], payload[:station_id], 'WIND_SPEED', payload[:data][:wind_speed] ])
-#      end
-#
-#      if payload[:data][:qfe]
-#        @pg.exec_prepared('insert_meter', [ payload[:sample_ts], payload[:station_id], 'QFE', payload[:data][:qfe] ])
-#      end
-#
-#      if payload[:data][:humidity]
-#        @pg.exec_prepared('insert_meter', [ payload[:sample_ts], payload[:station_id], 'HUMIDITY', payload[:data][:humidity] ])
-#      end
-#
-#      if payload[:data][:temperatur]
-#        @pg.exec_prepared('insert_meter', [ payload[:sample_ts], payload[:station_id], 'TEMPERATURE', payload[:data][:temperature] ])
-#      end
+      meter = @meters[message.routing_key] = res[0]['id']
     end
+
+    @pg.exec_prepared('insert_measure', [
+      meter,
+      payload[:voltage],
+      payload[:current],
+      payload[:power],
+      payload[:app_power],
+      payload[:rea_power],
+      payload[:frequency],
+      payload[:power_factor],
+      payload[:exported_energy],
+      payload[:imported_energy],
+      payload[:total_energy],
+    ])
   end
 
 
