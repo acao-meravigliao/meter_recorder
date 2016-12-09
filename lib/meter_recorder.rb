@@ -31,12 +31,16 @@ class App < Ygg::Agent::Base
   def agent_boot
     @pg = PG::Connection.open(mycfg.db.to_h)
 
-    @ins_statement = @pg.prepare('insert_measure',
+    @pg.prepare('insert_measure',
       'INSERT INTO acao_meter_measures (meter_id, at, voltage, current, power, app_power, rea_power, ' +
                                        'frequency, power_factor, exported_energy, imported_energy, total_energy) ' +
       'VALUES ($1,now(),$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)')
 
-    @lookup_statement = @pg.prepare('select_meter', 'SELECT * FROM acao_meters WHERE uuid=$1')
+    @pg.prepare('select_meter', 'SELECT * FROM acao_meters WHERE uuid=$1')
+
+    @pg.prepare('update_meter',
+      'UPDATE acao_meters SET last_update=now(), voltage=$2, current=$3, power=$4, app_power=$5, rea_power=$6, ' +
+       ' frequency=$7, power_factor=$8, exported_energy=$9, imported_energy=$10, total_energy=$11 WHERE id=$1')
 
     @amqp.ask(AM::AMQP::MsgExchangeDeclare.new(
       channel_id: @amqp_chan,
@@ -87,6 +91,20 @@ class App < Ygg::Agent::Base
     end
 
     @pg.exec_prepared('insert_measure', [
+      meter,
+      payload[:voltage],
+      payload[:current],
+      payload[:power],
+      payload[:app_power],
+      payload[:rea_power],
+      payload[:frequency],
+      payload[:power_factor],
+      payload[:exported_energy],
+      payload[:imported_energy],
+      payload[:total_energy],
+    ])
+
+    @pg.exec_prepared('update_meter', [
       meter,
       payload[:voltage],
       payload[:current],
